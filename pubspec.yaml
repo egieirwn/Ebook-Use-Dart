@@ -1,5 +1,5 @@
 name: ebook
-description: A new Flutter project.
+description: Aplikasi e-book modern berbasis Flutter dan Firebase.
 
 version: 1.0.0+1
 
@@ -16,6 +16,8 @@ dependencies:
   firebase_auth: ^4.17.8
   cloud_firestore: ^4.3.0
   firebase_storage: ^11.6.9
+  provider: ^6.1.2
+  http: ^1.2.0
 
 dev_dependencies:
   flutter_test:

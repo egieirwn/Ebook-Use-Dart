@@ -1,10 +1,16 @@
 import 'package:ebook/screen/login.dart';
 import 'package:flutter/material.dart';
-import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_auth/firebase_auth.dart' hide AuthProvider;
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:provider/provider.dart';
 import 'package:ebook/model/edit_profile.dart'; // Import EditProfilePage
+import 'package:ebook/provider/auth_provider.dart';
+import 'package:ebook/provider/theme_provider.dart';
+import 'package:ebook/screen/history.dart';
 
 class ProfilePage extends StatefulWidget {
+  const ProfilePage({super.key});
+
   @override
   _ProfilePageState createState() => _ProfilePageState();
 }
@@ -46,18 +52,11 @@ class _ProfilePageState extends State<ProfilePage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.white,
       appBar: AppBar(
-        backgroundColor: const Color.fromARGB(255, 85, 177, 238),
-        elevation: 0,
         centerTitle: true,
         title: const Text(
           'AKUN PENGGUNA',
-          style: TextStyle(
-            color: Colors.black,
-            fontWeight: FontWeight.bold,
-            fontSize: 18,
-          ),
+          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
         ),
       ),
       body: Padding(
@@ -68,11 +67,11 @@ class _ProfilePageState extends State<ProfilePage> {
             const SizedBox(height: 20),
             CircleAvatar(
               radius: 50,
-              backgroundColor: const Color.fromARGB(255, 180, 201, 231),
-              child: const Icon(
+              backgroundColor: Theme.of(context).colorScheme.primaryContainer,
+              child: Icon(
                 Icons.person,
                 size: 60,
-                color: Color.fromARGB(255, 27, 111, 221),
+                color: Theme.of(context).colorScheme.onPrimaryContainer,
               ),
             ),
             const SizedBox(height: 16),
@@ -81,7 +80,6 @@ class _ProfilePageState extends State<ProfilePage> {
               style: const TextStyle(
                 fontSize: 22,
                 fontWeight: FontWeight.bold,
-                color: Colors.black87,
               ),
             ),
             const SizedBox(height: 4),
@@ -89,7 +87,7 @@ class _ProfilePageState extends State<ProfilePage> {
               email,
               style: TextStyle(
                 fontSize: 16,
-                color: Colors.grey[700],
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
               ),
             ),
             const SizedBox(height: 8),
@@ -97,7 +95,7 @@ class _ProfilePageState extends State<ProfilePage> {
               'No. Telp: $phoneNumber',
               style: TextStyle(
                 fontSize: 14,
-                color: Colors.grey[600],
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
               ),
             ),
             const SizedBox(height: 4),
@@ -105,7 +103,7 @@ class _ProfilePageState extends State<ProfilePage> {
               'Tanggal Lahir: $birthDate',
               style: TextStyle(
                 fontSize: 14,
-                color: Colors.grey[600],
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
               ),
             ),
             const SizedBox(height: 16),
@@ -113,6 +111,41 @@ class _ProfilePageState extends State<ProfilePage> {
               child: ListView(
                 padding: EdgeInsets.zero,
                 children: [
+                  Consumer<ThemeProvider>(
+                    builder: (context, themeProvider, _) {
+                      return Card(
+                        margin: const EdgeInsets.symmetric(vertical: 8.0),
+                        child: SwitchListTile(
+                          secondary: Icon(
+                            themeProvider.isDarkMode
+                                ? Icons.dark_mode
+                                : Icons.light_mode,
+                          ),
+                          title: const Text(
+                            'Mode Gelap',
+                            style: TextStyle(
+                              fontWeight: FontWeight.w500,
+                              fontSize: 16,
+                            ),
+                          ),
+                          value: themeProvider.isDarkMode,
+                          onChanged: (_) => themeProvider.toggleTheme(),
+                        ),
+                      );
+                    },
+                  ),
+                  ProfileMenuItems(
+                    icon: Icons.history_rounded,
+                    title: 'Riwayat Membaca',
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => const HistoryPages(),
+                        ),
+                      );
+                    },
+                  ),
                   ProfileMenuItems(
                     icon: Icons.edit,
                     title: 'Edit Profile',
@@ -149,11 +182,15 @@ class _ProfilePageState extends State<ProfilePage> {
                     icon: Icons.logout,
                     title: 'Logout',
                     color: Colors.red,
-                    onTap: () {
-                      FirebaseAuth.instance.signOut();
-                      Navigator.pushReplacement(
+                    onTap: () async {
+                      await context.read<AuthProvider>().signOut();
+                      if (!context.mounted) return;
+                      Navigator.pushAndRemoveUntil(
                         context,
-                        MaterialPageRoute(builder: (context) => LoginPage()),
+                        MaterialPageRoute(
+                          builder: (context) => const LoginPage(),
+                        ),
+                        (route) => false,
                       );
                     },
                   ),
@@ -188,27 +225,26 @@ class ProfileMenuItems extends StatelessWidget {
   final IconData icon;
   final String title;
   final Function onTap;
-  final Color color;
+  final Color? color;
 
   ProfileMenuItems({
     required this.icon,
     required this.title,
     required this.onTap,
-    this.color = Colors.black,
+    this.color,
   });
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+
     return Card(
       margin: const EdgeInsets.symmetric(vertical: 8.0),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-      ),
-      elevation: 3,
+      elevation: 0,
       child: ListTile(
         leading: Icon(
           icon,
-          color: color,
+          color: color ?? scheme.primary,
         ),
         title: Text(
           title,
@@ -220,7 +256,7 @@ class ProfileMenuItems extends StatelessWidget {
         trailing: Icon(
           Icons.arrow_forward_ios,
           size: 16,
-          color: Colors.grey[600],
+          color: scheme.onSurfaceVariant,
         ),
         onTap: () => onTap(),
       ),

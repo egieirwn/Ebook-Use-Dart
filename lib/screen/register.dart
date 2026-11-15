@@ -1,204 +1,263 @@
 import 'package:flutter/material.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:provider/provider.dart';
+
+import 'package:ebook/provider/auth_provider.dart';
+import 'package:ebook/screen/main_shell.dart';
 
 class RegisterPage extends StatefulWidget {
+  const RegisterPage({super.key});
+
   @override
-  _RegisterPageState createState() => _RegisterPageState();
+  State<RegisterPage> createState() => _RegisterPageState();
 }
 
 class _RegisterPageState extends State<RegisterPage> {
-  final TextEditingController _fullNameController = TextEditingController();
-  final TextEditingController _dobController = TextEditingController();
-  final TextEditingController _addressController = TextEditingController();
-  final TextEditingController _phoneController = TextEditingController();
-  final TextEditingController _emailController = TextEditingController();
-  final TextEditingController _passwordController = TextEditingController();
+  final _formKey = GlobalKey<FormState>();
+  final _nameController = TextEditingController();
+  final _emailController = TextEditingController();
+  final _phoneController = TextEditingController();
+  final _dobController = TextEditingController();
+  final _addressController = TextEditingController();
+  final _passwordController = TextEditingController();
+  final _confirmController = TextEditingController();
 
-  bool _isPasswordVisible = false;
+  bool _obscurePassword = true;
+  bool _obscureConfirm = true;
 
-  void _togglePasswordView() {
-    setState(() {
-      _isPasswordVisible = !_isPasswordVisible;
-    });
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _emailController.dispose();
+    _phoneController.dispose();
+    _dobController.dispose();
+    _addressController.dispose();
+    _passwordController.dispose();
+    _confirmController.dispose();
+    super.dispose();
   }
 
-  Future<void> _registerUser() async {
-    try {
-      UserCredential userCredential =
-          await FirebaseAuth.instance.createUserWithEmailAndPassword(
-        email: _emailController.text.trim(),
-        password: _passwordController.text.trim(),
-      );
+  Future<void> _pickBirthDate() async {
+    final now = DateTime.now();
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: DateTime(now.year - 18, now.month, now.day),
+      firstDate: DateTime(1900),
+      lastDate: now,
+      helpText: 'Pilih tanggal lahir',
+    );
 
-      await FirebaseFirestore.instance
-          .collection('users')
-          .doc(userCredential.user!.uid)
-          .set({
-        'fullName': _fullNameController.text.trim(),
-        'dob': _dobController.text.trim(),
-        'address': _addressController.text.trim(),
-        'phone': _phoneController.text.trim(),
-        'email': _emailController.text.trim(),
+    if (picked != null && mounted) {
+      final day = picked.day.toString().padLeft(2, '0');
+      final month = picked.month.toString().padLeft(2, '0');
+      setState(() {
+        _dobController.text = '${picked.year}-$month-$day';
       });
+    }
+  }
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Registrasi berhasil!')),
+  Future<void> _register() async {
+    if (!_formKey.currentState!.validate()) return;
+    FocusScope.of(context).unfocus();
+
+    final auth = context.read<AuthProvider>();
+    final success = await auth.register(
+      email: _emailController.text,
+      password: _passwordController.text,
+      fullName: _nameController.text,
+      phone: _phoneController.text,
+      dob: _dobController.text,
+      address: _addressController.text,
+    );
+
+    if (!mounted) return;
+
+    if (success) {
+      Navigator.pushAndRemoveUntil(
+        context,
+        MaterialPageRoute(builder: (context) => const MainShell()),
+        (route) => false,
       );
-      Navigator.pop(context);
-    } catch (e) {
+    } else {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Terjadi kesalahan: $e')),
+        SnackBar(content: Text(auth.error ?? 'Registrasi gagal. Coba lagi.')),
       );
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final isLoading = context.watch<AuthProvider>().isLoading;
+
     return Scaffold(
-      backgroundColor: const Color.fromARGB(255, 18, 134, 188),
-      body: Center(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 30.0, vertical: 40.0),
-          child: ListView(
-            shrinkWrap: true,
-            children: [
-              const Text(
-                'Registrasi',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 28,
-                  fontWeight: FontWeight.bold,
-                ),
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 10),
-              _buildLabelText('Nama Lengkap'),
-              _buildTextField(_fullNameController, 'Nama Lengkap',
-                  icon: Icons.person),
-              const SizedBox(height: 10),
-              _buildLabelText('Tanggal Lahir'),
-              _buildTextField(_dobController, 'Tanggal Lahir',
-                  icon: Icons.calendar_today),
-              const SizedBox(height: 10),
-              _buildLabelText('Alamat'),
-              _buildTextField(_addressController, 'Alamat',
-                  icon: Icons.location_on),
-              const SizedBox(height: 10),
-              _buildLabelText('Nomor Handphone'),
-              _buildTextField(_phoneController, 'Nomor Handphone',
-                  icon: Icons.phone),
-              const SizedBox(height: 10),
-              _buildLabelText('Email'),
-              _buildTextField(_emailController, 'Email', icon: Icons.email),
-              const SizedBox(height: 10),
-              _buildLabelText('Password'),
-              _buildTextField(
-                _passwordController,
-                'Password',
-                isPassword: true,
-                icon: Icons.lock,
-              ),
-              const SizedBox(height: 30),
-              _buildRegisterButton(context),
-              const SizedBox(height: 10),
-              _buildBackButton(context),
-            ],
-          ),
-        ),
+      appBar: AppBar(
+        title: const Text('Buat Akun'),
       ),
-    );
-  }
-
-  Widget _buildLabelText(String label) {
-    return Text(
-      label,
-      style: const TextStyle(
-        color: Colors.white,
-        fontSize: 16,
-        fontWeight: FontWeight.bold,
-      ),
-      textAlign: TextAlign.start,
-    );
-  }
-
-  Widget _buildTextField(TextEditingController controller, String hint,
-      {bool isPassword = false, IconData? icon}) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8.0),
-      child: TextField(
-        controller: controller,
-        obscureText: isPassword ? !_isPasswordVisible : false,
-        decoration: InputDecoration(
-          filled: true,
-          fillColor: Colors.white,
-          hintText: hint,
-          prefixIcon: icon != null ? Icon(icon) : null,
-          suffixIcon: isPassword
-              ? GestureDetector(
-                  onTap: _togglePasswordView,
-                  child: Icon(
-                    _isPasswordVisible
-                        ? Icons.visibility
-                        : Icons.visibility_off,
-                    color: Colors.grey,
+      body: Form(
+        key: _formKey,
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(24, 8, 24, 40),
+          children: [
+            Text(
+              'Lengkapi data dirimu',
+              style: TextStyle(
+                fontSize: 13,
+                color: scheme.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(height: 20),
+            TextFormField(
+              controller: _nameController,
+              textInputAction: TextInputAction.next,
+              textCapitalization: TextCapitalization.words,
+              decoration: const InputDecoration(
+                labelText: 'Nama Lengkap',
+                prefixIcon: Icon(Icons.person_outline_rounded),
+              ),
+              validator: (value) => (value == null || value.trim().isEmpty)
+                  ? 'Nama lengkap wajib diisi'
+                  : null,
+            ),
+            const SizedBox(height: 14),
+            TextFormField(
+              controller: _emailController,
+              keyboardType: TextInputType.emailAddress,
+              textInputAction: TextInputAction.next,
+              decoration: const InputDecoration(
+                labelText: 'Email',
+                prefixIcon: Icon(Icons.email_outlined),
+              ),
+              validator: (value) {
+                final email = value?.trim() ?? '';
+                if (email.isEmpty) return 'Email wajib diisi';
+                if (!email.contains('@') || !email.contains('.')) {
+                  return 'Format email tidak valid';
+                }
+                return null;
+              },
+            ),
+            const SizedBox(height: 14),
+            TextFormField(
+              controller: _phoneController,
+              keyboardType: TextInputType.phone,
+              textInputAction: TextInputAction.next,
+              decoration: const InputDecoration(
+                labelText: 'Nomor Handphone',
+                prefixIcon: Icon(Icons.phone_outlined),
+              ),
+            ),
+            const SizedBox(height: 14),
+            TextFormField(
+              controller: _dobController,
+              readOnly: true,
+              onTap: _pickBirthDate,
+              decoration: const InputDecoration(
+                labelText: 'Tanggal Lahir',
+                prefixIcon: Icon(Icons.cake_outlined),
+                suffixIcon: Icon(Icons.calendar_today_outlined, size: 18),
+              ),
+            ),
+            const SizedBox(height: 14),
+            TextFormField(
+              controller: _addressController,
+              textInputAction: TextInputAction.next,
+              maxLines: 2,
+              decoration: const InputDecoration(
+                labelText: 'Alamat',
+                prefixIcon: Icon(Icons.location_on_outlined),
+                alignLabelWithHint: true,
+              ),
+            ),
+            const SizedBox(height: 14),
+            TextFormField(
+              controller: _passwordController,
+              obscureText: _obscurePassword,
+              textInputAction: TextInputAction.next,
+              decoration: InputDecoration(
+                labelText: 'Password',
+                prefixIcon: const Icon(Icons.lock_outline_rounded),
+                suffixIcon: IconButton(
+                  onPressed: () => setState(
+                    () => _obscurePassword = !_obscurePassword,
                   ),
-                )
-              : null,
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(8),
-            borderSide: BorderSide.none,
-          ),
-          contentPadding:
-              const EdgeInsets.symmetric(vertical: 15, horizontal: 10),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildRegisterButton(BuildContext context) {
-    return SizedBox(
-      width: double.infinity,
-      child: ElevatedButton(
-        onPressed: _registerUser,
-        style: ElevatedButton.styleFrom(
-          backgroundColor: const Color.fromARGB(255, 3, 57, 138),
-          padding: const EdgeInsets.symmetric(vertical: 15),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(8),
-          ),
-        ),
-        child: const Text(
-          'Registrasi',
-          style: TextStyle(
-            fontSize: 16,
-            color: Colors.white,
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildBackButton(BuildContext context) {
-    return SizedBox(
-      width: double.infinity,
-      child: ElevatedButton(
-        onPressed: () {
-          Navigator.pop(context);
-        },
-        style: ElevatedButton.styleFrom(
-          backgroundColor: Colors.white,
-          padding: const EdgeInsets.symmetric(vertical: 15),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(8),
-          ),
-        ),
-        child: Text(
-          'Kembali',
-          style: TextStyle(
-            fontSize: 16,
-            color: const Color.fromARGB(255, 74, 74, 75),
-          ),
+                  icon: Icon(
+                    _obscurePassword
+                        ? Icons.visibility_off_outlined
+                        : Icons.visibility_outlined,
+                  ),
+                ),
+              ),
+              validator: (value) {
+                if (value == null || value.isEmpty) {
+                  return 'Password wajib diisi';
+                }
+                if (value.length < 6) {
+                  return 'Password minimal 6 karakter';
+                }
+                return null;
+              },
+            ),
+            const SizedBox(height: 14),
+            TextFormField(
+              controller: _confirmController,
+              obscureText: _obscureConfirm,
+              textInputAction: TextInputAction.done,
+              onFieldSubmitted: (_) => _register(),
+              decoration: InputDecoration(
+                labelText: 'Konfirmasi Password',
+                prefixIcon: const Icon(Icons.lock_reset_rounded),
+                suffixIcon: IconButton(
+                  onPressed: () => setState(
+                    () => _obscureConfirm = !_obscureConfirm,
+                  ),
+                  icon: Icon(
+                    _obscureConfirm
+                        ? Icons.visibility_off_outlined
+                        : Icons.visibility_outlined,
+                  ),
+                ),
+              ),
+              validator: (value) {
+                if (value == null || value.isEmpty) {
+                  return 'Konfirmasi password wajib diisi';
+                }
+                if (value != _passwordController.text) {
+                  return 'Password tidak sama';
+                }
+                return null;
+              },
+            ),
+            const SizedBox(height: 28),
+            FilledButton(
+              onPressed: isLoading ? null : _register,
+              child: isLoading
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Text('Daftar'),
+            ),
+            const SizedBox(height: 12),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Text(
+                  'Sudah punya akun?',
+                  style: TextStyle(
+                    fontSize: 14,
+                    color: scheme.onSurfaceVariant,
+                  ),
+                ),
+                TextButton(
+                  onPressed: isLoading
+                      ? null
+                      : () => Navigator.pop(context),
+                  child: const Text('Masuk'),
+                ),
+              ],
+            ),
+          ],
         ),
       ),
     );

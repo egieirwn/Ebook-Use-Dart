@@ -1,16 +1,5 @@
 import 'package:flutter/material.dart';
 
-void main() {
-  runApp(MaterialApp(
-    title: 'Daftar Isi Buku',
-    debugShowCheckedModeBanner: false,
-    theme: ThemeData(
-      primarySwatch: Colors.blue,
-    ),
-    home: DetailBukuPage(),
-  ));
-}
-
 class DetailBukuPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
@@ -45,7 +34,7 @@ class TableOfContentsScreen extends StatelessWidget {
             style: TextStyle(
               fontSize: 24,
               fontWeight: FontWeight.bold,
-              color: const Color.fromARGB(255, 18, 134, 188),
+              color: Theme.of(context).colorScheme.primary,
             ),
           ),
           const SizedBox(height: 10),
@@ -54,17 +43,17 @@ class TableOfContentsScreen extends StatelessWidget {
               itemCount: chapters.length,
               itemBuilder: (context, index) {
                 return Card(
-                  elevation: 4,
+                  elevation: 0,
                   margin: const EdgeInsets.symmetric(vertical: 8),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
                   child: ListTile(
+                    leading: CircleAvatar(
+                      child: Text('${index + 1}'),
+                    ),
                     title: Text(
                       chapters[index],
                       style: const TextStyle(fontWeight: FontWeight.bold),
                     ),
-                    trailing: const Icon(Icons.arrow_forward_ios),
+                    trailing: const Icon(Icons.arrow_forward_ios, size: 16),
                     onTap: () {
                       Navigator.push(
                         context,
@@ -106,7 +95,15 @@ class _ChapterContentScreenState extends State<ChapterContentScreen> {
   int _currentPage = 0;
 
   @override
+  void dispose() {
+    _pageController.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+
     return Scaffold(
       appBar: AppBar(
         title: Text(widget.chapterTitle),
@@ -128,13 +125,13 @@ class _ChapterContentScreenState extends State<ChapterContentScreen> {
                   padding: const EdgeInsets.all(16.0),
                   child: Container(
                     decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(12),
+                      color: scheme.surfaceContainerLow,
+                      borderRadius: BorderRadius.circular(16),
                       boxShadow: [
                         BoxShadow(
-                          color: Colors.grey.shade300,
-                          blurRadius: 5,
-                          offset: Offset(0, 3),
+                          color: Colors.black.withOpacity(0.08),
+                          blurRadius: 8,
+                          offset: const Offset(0, 4),
                         ),
                       ],
                     ),
@@ -146,7 +143,7 @@ class _ChapterContentScreenState extends State<ChapterContentScreen> {
                           style: const TextStyle(
                             fontSize: 16,
                             fontWeight: FontWeight.w400,
-                            height: 1.5,
+                            height: 1.6,
                           ),
                           textAlign: TextAlign.center,
                         ),
@@ -158,10 +155,13 @@ class _ChapterContentScreenState extends State<ChapterContentScreen> {
             ),
           ),
           Container(
-            padding: const EdgeInsets.symmetric(vertical: 5.0),
+            padding: const EdgeInsets.symmetric(vertical: 8.0),
             child: Text(
               'Halaman ${_currentPage + 1} / ${widget.totalPages}',
-              style: const TextStyle(fontSize: 16),
+              style: TextStyle(
+                fontSize: 14,
+                color: scheme.onSurfaceVariant,
+              ),
             ),
           ),
         ],

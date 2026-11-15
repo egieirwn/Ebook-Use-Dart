@@ -1,272 +1,630 @@
 import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:ebook/screen/book_detail.dart' as detail;
-import 'package:ebook/screen/book_update.dart' as update;
+
+import 'package:ebook/model/book_model.dart';
+import 'package:ebook/service/book_service.dart';
+import 'package:ebook/screen/book_detail.dart';
+import 'package:ebook/screen/book_update.dart';
+import 'package:ebook/widgets/book_card.dart';
+import 'package:ebook/widgets/empty_state.dart';
 
 class HomePage extends StatefulWidget {
+  final bool isAdmin;
+  final VoidCallback? onOpenSearch;
+
+  const HomePage({
+    super.key,
+    this.isAdmin = false,
+    this.onOpenSearch,
+  });
+
   @override
-  _HomePageState createState() => _HomePageState();
+  State<HomePage> createState() => _HomePageState();
 }
 
 class _HomePageState extends State<HomePage> {
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-  List<Map<String, dynamic>> recommendedBooks = [];
-  List<Map<String, dynamic>> newBooks = [];
+  final BookService _service = BookService();
+
+  List<BookModel> _books = [];
   bool _isLoading = true;
-  TextEditingController _searchController = TextEditingController();
-  List<Map<String, dynamic>> searchResults = [];
+  String? _error;
+  String _selectedCategory = 'Semua';
 
   @override
   void initState() {
     super.initState();
-    _fetchBooks();
-    _searchController.addListener(() {
-      _searchBooks(_searchController.text);
-    });
+    _loadBooks();
   }
 
-  Future<void> _fetchBooks() async {
+  Future<void> _loadBooks() async {
+    setState(() {
+      _isLoading = true;
+      _error = null;
+    });
+
     try {
-      setState(() => _isLoading = true);
-
-      // Fetch recommended books
-      var recommendedSnapshot = await _firestore
-          .collection('books')
-          .where('category', isEqualTo: 'Recommended')
-          .get();
-
-      // Fetch new books
-      var newBooksSnapshot = await _firestore
-          .collection('books')
-          .where('category', isEqualTo: 'NewBook')
-          .get();
-
+      final books = await _service.fetchAll();
+      if (!mounted) return;
       setState(() {
-        recommendedBooks = recommendedSnapshot.docs.map((doc) {
-          var data = doc.data();
-          return {
-            'id': doc.id,
-            'title': data['title'],
-            'author': data['author'],
-            'image': data['image'] ?? 'assets/images/default.png',
-            'pages': data['pages'] ?? 0,
-          };
-        }).toList();
-
-        newBooks = newBooksSnapshot.docs.map((doc) {
-          var data = doc.data();
-          return {
-            'id': doc.id,
-            'title': data['title'],
-            'author': data['author'],
-            'image': data['image'] ?? 'assets/images/default.png',
-            'pages': data['pages'] ?? 0,
-          };
-        }).toList();
-
-        searchResults = [...recommendedBooks, ...newBooks];
+        _books = books;
         _isLoading = false;
       });
     } catch (e) {
-      print('Error fetching books: $e');
-      setState(() => _isLoading = false);
+      if (!mounted) return;
+      setState(() {
+        _error = 'Gagal memuat buku: $e';
+        _isLoading = false;
+      });
     }
   }
 
-  void _searchBooks(String query) {
-    setState(() {
-      if (query.isEmpty) {
-        searchResults = [];
-      } else {
-        searchResults = [
-          ...recommendedBooks.where((book) =>
-              book['title'].toLowerCase().contains(query.toLowerCase())),
-          ...newBooks.where((book) =>
-              book['title'].toLowerCase().contains(query.toLowerCase())),
-        ];
-      }
-    });
+  List<String> get _categories {
+    final categories = <String>{'Semua'};
+    for (final book in _books) {
+      if (book.category.trim().isNotEmpty) categories.add(book.category);
+    }
+    return categories.toList();
   }
 
-  Future<void> _deleteBook(String bookId) async {
+  List<BookModel> get _filteredBooks {
+    if (_selectedCategory == 'Semua') return _books;
+    return _books.where((b) => b.category == _selectedCategory).toList();
+  }
+
+  String _categoryLabel(String category) {
+    switch (category) {
+      case 'Semua':
+        return 'Semua';
+      case 'Recommended':
+        return 'Rekomendasi';
+      case 'NewBook':
+        return 'Buku Baru';
+      case 'General':
+        return 'Umum';
+      default:
+        return category;
+    }
+  }
+
+  Future<void> _openEditor({BookModel? book}) async {
+    final result = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(
+        builder: (context) => UpdateBookPage(
+          book: book,
+          bookId: book?.id ?? '',
+          title: book?.title ?? '',
+          author: book?.author ?? '',
+          image: book?.image ?? '',
+          pages: book?.pages ?? 0,
+        ),
+      ),
+    );
+
+    if (result == true) {
+      _loadBooks();
+    }
+  }
+
+  Future<void> _confirmDelete(BookModel book) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Hapus Buku'),
+        content: Text(
+          'Apakah kamu yakin ingin menghapus "${book.title}"? Tindakan ini tidak dapat dibatalkan.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Batal'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            child: const Text('Hapus'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
     try {
-      await _firestore.collection('books').doc(bookId).delete();
-      _fetchBooks();
+      await _service.deleteBook(book.id);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('"${book.title}" berhasil dihapus.')),
+      );
+      _loadBooks();
     } catch (e) {
-      print("Error deleting book: $e");
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Gagal menghapus buku: $e')),
+      );
     }
+  }
+
+  void _openBook(BookModel book) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => BookDetailPage(
+          bookModel: book,
+          bookId: book.id,
+          title: book.title,
+          author: book.author,
+          image: book.image,
+          pages: book.pages,
+        ),
+      ),
+    ).then((_) => _loadBooks());
+  }
+
+  Widget _bookGrid(List<BookModel> books) {
+    return GridView.builder(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+        maxCrossAxisExtent: 170,
+        mainAxisSpacing: 18,
+        crossAxisSpacing: 16,
+        childAspectRatio: 0.56,
+      ),
+      itemCount: books.length,
+      itemBuilder: (context, index) {
+        final book = books[index];
+        return BookCard(
+          book: book,
+          onTap: () => _openBook(book),
+          onEdit: widget.isAdmin ? () => _openEditor(book: book) : null,
+          onDelete: widget.isAdmin ? () => _confirmDelete(book) : null,
+        );
+      },
+    );
+  }
+
+  Widget _sectionHeader(String title, {VoidCallback? onSeeAll}) {
+    return Row(
+      children: [
+        Expanded(
+          child: Text(
+            title,
+            style: const TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ),
+        if (onSeeAll != null)
+          TextButton(
+            onPressed: onSeeAll,
+            child: const Text('Lihat semua'),
+          ),
+      ],
+    );
   }
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+
     return Scaffold(
       appBar: AppBar(
-        title: Text(
-          'Ebook',
-          style: TextStyle(
-            fontWeight: FontWeight.bold,
-            color: Colors.white,
-          ),
-        ),
-        backgroundColor: Colors.blueAccent,
-      ),
-      body: _isLoading
-          ? Center(child: CircularProgressIndicator())
-          : SingleChildScrollView(
-              padding: EdgeInsets.all(16),
+        toolbarHeight: 72,
+        title: Row(
+          children: [
+            Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [scheme.primary, scheme.tertiary],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Icon(
+                Icons.auto_stories_rounded,
+                color: scheme.onPrimary,
+                size: 22,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  // Banner
-                  Container(
-                    margin: EdgeInsets.only(bottom: 20),
-                    width: 600,
-                    height: 280,
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(12),
-                      image: DecorationImage(
-                        image: AssetImage('assets/images/Banner.png'),
-                        fit: BoxFit.cover,
-                      ),
-                    ),
-                  ),
-                  // Search bar
-                  TextField(
-                    controller: _searchController,
-                    decoration: InputDecoration(
-                      hintText: 'Search',
-                      prefixIcon: Icon(Icons.search),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                    ),
-                  ),
-                  SizedBox(height: 20),
-                  // Recommended Books (Search or All)
-                  if (_searchController.text.isEmpty)
-                    Text(
-                      'Rekomendasi',
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.blue,
-                      ),
-                    ),
-                  _buildBookGrid(_searchController.text.isEmpty
-                          ? recommendedBooks // Display only recommended books if no search
-                          : searchResults // Otherwise, display search results
-                      ),
-                  SizedBox(height: 20),
-                  // New Books
-                  Text(
-                    'Buku Baru',
+                  const Text(
+                    'Ebook',
                     style: TextStyle(
-                      fontSize: 18,
+                      fontSize: 20,
                       fontWeight: FontWeight.bold,
-                      color: Colors.blue,
                     ),
                   ),
-                  _buildBookGrid(newBooks), // Always show new books
+                  Text(
+                    widget.isAdmin ? 'Mode Admin' : 'Temukan bacaan favoritmu',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.normal,
+                      color: widget.isAdmin
+                          ? scheme.primary
+                          : scheme.onSurfaceVariant,
+                    ),
+                  ),
                 ],
               ),
             ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (context) => update.UpdateBookPage(
-                // Use the alias here
-                title: '',
-                author: '',
-                image: '',
-                bookId: '',
-                pages: 0,
+          ],
+        ),
+        actions: [
+          if (widget.isAdmin)
+            Padding(
+              padding: const EdgeInsets.only(right: 12),
+              child: Center(
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: scheme.primaryContainer,
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(
+                    'Admin',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: scheme.onPrimaryContainer,
+                    ),
+                  ),
+                ),
               ),
             ),
-          ).then((_) => _fetchBooks());
-        },
-        child: Icon(Icons.add),
-        backgroundColor: Colors.blueAccent,
+        ],
       ),
+      floatingActionButton: widget.isAdmin
+          ? FloatingActionButton.extended(
+              onPressed: () => _openEditor(),
+              icon: const Icon(Icons.add_rounded),
+              label: const Text('Tambah Buku'),
+            )
+          : null,
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : RefreshIndicator(
+              onRefresh: _loadBooks,
+              child: ListView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 96),
+                children: [
+                  _SearchBarButton(
+                    onTap: widget.onOpenSearch,
+                  ),
+                  const SizedBox(height: 20),
+                  const _PromoBanner(),
+                  const SizedBox(height: 24),
+                  if (_error != null)
+                    _ErrorBanner(
+                      message: _error!,
+                      onRetry: _loadBooks,
+                    ),
+                  _sectionHeader('Kategori'),
+                  const SizedBox(height: 4),
+                  SizedBox(
+                    height: 44,
+                    child: ListView.separated(
+                      scrollDirection: Axis.horizontal,
+                      itemCount: _categories.length,
+                      separatorBuilder: (_, __) => const SizedBox(width: 8),
+                      itemBuilder: (context, index) {
+                        final category = _categories[index];
+                        return ChoiceChip(
+                          label: Text(_categoryLabel(category)),
+                          selected: _selectedCategory == category,
+                          onSelected: (_) {
+                            setState(() => _selectedCategory = category);
+                          },
+                        );
+                      },
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  if (_books.isEmpty)
+                    const Padding(
+                      padding: EdgeInsets.only(top: 24),
+                      child: EmptyState(
+                        title: 'Belum ada buku',
+                        message:
+                            'Koleksi buku masih kosong. Tambahkan buku pertama untuk mulai membaca.',
+                      ),
+                    )
+                  else if (_selectedCategory == 'Semua')
+                    ..._buildDefaultSections()
+                  else
+                    ..._buildCategorySection(),
+                ],
+              ),
+            ),
     );
   }
 
-  Widget _buildBookGrid(List<Map<String, dynamic>> books) {
-    if (books.isEmpty) {
-      return Text('Tidak ada buku');
+  List<Widget> _buildDefaultSections() {
+    final recommended = _books
+        .where((b) => b.category == 'Recommended')
+        .toList();
+    final newBooks = _books.where((b) => b.category == 'NewBook').toList();
+    final others = _books
+        .where((b) => b.category != 'Recommended' && b.category != 'NewBook')
+        .toList();
+
+    final widgets = <Widget>[];
+
+    if (recommended.isNotEmpty) {
+      widgets.add(_sectionHeader('Rekomendasi'));
+      widgets.add(const SizedBox(height: 12));
+      widgets.add(_bookGrid(recommended));
+      widgets.add(const SizedBox(height: 24));
     }
 
-    return GridView.builder(
-      shrinkWrap: true,
-      physics: NeverScrollableScrollPhysics(),
-      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 3,
-        mainAxisSpacing: 10,
-        crossAxisSpacing: 10,
-        childAspectRatio: 0.65,
+    if (newBooks.isNotEmpty) {
+      widgets.add(_sectionHeader('Buku Baru'));
+      widgets.add(const SizedBox(height: 12));
+      widgets.add(_bookGrid(newBooks));
+      widgets.add(const SizedBox(height: 24));
+    }
+
+    if (others.isNotEmpty) {
+      widgets.add(_sectionHeader('Koleksi Lainnya'));
+      widgets.add(const SizedBox(height: 12));
+      widgets.add(_bookGrid(others));
+    }
+
+    if (recommended.isEmpty && newBooks.isEmpty && others.isEmpty) {
+      widgets.add(const EmptyState(
+        title: 'Belum ada buku',
+        message: 'Tambahkan buku untuk mulai mengisi koleksi.',
+      ));
+    }
+
+    return widgets;
+  }
+
+  List<Widget> _buildCategorySection() {
+    final books = _filteredBooks;
+    if (books.isEmpty) {
+      return [
+        Padding(
+          padding: const EdgeInsets.only(top: 24),
+          child: EmptyState(
+            title: 'Kategori kosong',
+            message:
+                'Belum ada buku pada kategori ${_categoryLabel(_selectedCategory)}.',
+          ),
+        ),
+      ];
+    }
+
+    return [
+      _sectionHeader(_categoryLabel(_selectedCategory)),
+      const SizedBox(height: 12),
+      _bookGrid(books),
+    ];
+  }
+}
+
+class _SearchBarButton extends StatelessWidget {
+  final VoidCallback? onTap;
+
+  const _SearchBarButton({this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(16),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        decoration: BoxDecoration(
+          color: scheme.surfaceContainerHighest.withOpacity(0.5),
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Row(
+          children: [
+            Icon(Icons.search_rounded, color: scheme.onSurfaceVariant),
+            const SizedBox(width: 12),
+            Text(
+              'Cari judul atau penulis...',
+              style: TextStyle(
+                color: scheme.onSurfaceVariant,
+                fontSize: 14,
+              ),
+            ),
+          ],
+        ),
       ),
-      itemCount: books.length,
-      itemBuilder: (context, index) {
-        return GestureDetector(
-          onTap: () {
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (context) => detail.BookDetailPage(
-                  // Use the alias here
-                  title: books[index]['title'],
-                  author: books[index]['author'],
-                  image: books[index]['image'],
-                  pages: books[index]['pages'],
-                  book: books[index], bookId: '',
+    );
+  }
+}
+
+class _PromoBanner extends StatefulWidget {
+  const _PromoBanner();
+
+  @override
+  State<_PromoBanner> createState() => _PromoBannerState();
+}
+
+class _PromoBannerState extends State<_PromoBanner> {
+  final PageController _controller = PageController(viewportFraction: 0.94);
+  int _current = 0;
+
+  final List<_PromoItem> _items = const [
+    _PromoItem(
+      title: 'Baca di mana saja',
+      subtitle: 'Bawa perpustakaanmu dalam genggaman.',
+      icon: Icons.auto_stories_rounded,
+    ),
+    _PromoItem(
+      title: 'Koleksi pilihan',
+      subtitle: 'Temukan buku rekomendasi terbaik setiap hari.',
+      icon: Icons.local_library_rounded,
+    ),
+    _PromoItem(
+      title: 'Jelajahi dunia baru',
+      subtitle: 'Ribuan cerita menanti untuk kamu baca.',
+      icon: Icons.public_rounded,
+    ),
+  ];
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+
+    return Column(
+      children: [
+        SizedBox(
+          height: 158,
+          child: PageView.builder(
+            controller: _controller,
+            itemCount: _items.length,
+            onPageChanged: (index) => setState(() => _current = index),
+            itemBuilder: (context, index) {
+              final item = _items[index];
+              final gradients = [
+                [scheme.primary, scheme.tertiary],
+                [scheme.tertiary, scheme.secondary],
+                [scheme.secondary, scheme.primary],
+              ];
+
+              return Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+                child: Container(
+                  padding: const EdgeInsets.all(20),
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: gradients[index % gradients.length],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
+                    borderRadius: BorderRadius.circular(22),
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Text(
+                              item.title,
+                              style: TextStyle(
+                                color: scheme.onPrimary,
+                                fontSize: 20,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              item.subtitle,
+                              style: TextStyle(
+                                color: scheme.onPrimary.withOpacity(0.85),
+                                fontSize: 13,
+                                height: 1.4,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Icon(
+                        item.icon,
+                        size: 64,
+                        color: scheme.onPrimary.withOpacity(0.85),
+                      ),
+                    ],
+                  ),
                 ),
+              );
+            },
+          ),
+        ),
+        const SizedBox(height: 10),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: List.generate(_items.length, (index) {
+            final active = index == _current;
+            return AnimatedContainer(
+              duration: const Duration(milliseconds: 250),
+              margin: const EdgeInsets.symmetric(horizontal: 3),
+              width: active ? 20 : 8,
+              height: 8,
+              decoration: BoxDecoration(
+                color: active
+                    ? scheme.primary
+                    : scheme.onSurfaceVariant.withOpacity(0.3),
+                borderRadius: BorderRadius.circular(8),
               ),
             );
-          },
-          child: Stack(
-            children: [
-              Column(
-                children: [
-                  Image.network(
-                    books[index]['image'],
-                    height: 150,
-                    width: 100,
-                    fit: BoxFit.cover,
-                  ),
-                  Text(
-                    books[index]['title'],
-                    textAlign: TextAlign.center,
-                  ),
-                  Text(
-                    books[index]['author'],
-                    style: TextStyle(color: Colors.grey),
-                    textAlign: TextAlign.center,
-                  ),
-                  Text(
-                    'Pages: ${books[index]['pages']}',
-                    style: TextStyle(color: Colors.grey, fontSize: 12),
-                    textAlign: TextAlign.center,
-                  ),
-                ],
-              ),
-              Positioned(
-                top: 5,
-                right: 5,
-                child: IconButton(
-                  icon: Icon(
-                    Icons.delete,
-                    color: Colors.red,
-                  ),
-                  onPressed: () {
-                    _deleteBook(books[index]['id']);
-                  },
-                ),
-              ),
-            ],
+          }),
+        ),
+      ],
+    );
+  }
+}
+
+class _PromoItem {
+  final String title;
+  final String subtitle;
+  final IconData icon;
+
+  const _PromoItem({
+    required this.title,
+    required this.subtitle,
+    required this.icon,
+  });
+}
+
+class _ErrorBanner extends StatelessWidget {
+  final String message;
+  final VoidCallback onRetry;
+
+  const _ErrorBanner({required this.message, required this.onRetry});
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: scheme.errorContainer,
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.error_outline, color: scheme.onErrorContainer),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              message,
+              style: TextStyle(color: scheme.onErrorContainer, fontSize: 13),
+            ),
           ),
-        );
-      },
+          TextButton(
+            onPressed: onRetry,
+            child: const Text('Coba lagi'),
+          ),
+        ],
+      ),
     );
   }
 }

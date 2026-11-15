@@ -1,20 +1,37 @@
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart' hide AuthProvider;
 import 'package:firebase_core/firebase_core.dart';
-import 'firebase_options.dart'; // Generated file dari Firebase CLI
-import 'screen/login.dart'; // Pastikan path file sudah sesuai
+import 'package:provider/provider.dart';
+
+import 'firebase_options.dart';
+import 'provider/auth_provider.dart';
+import 'provider/theme_provider.dart';
+import 'screen/login.dart';
+import 'screen/main_shell.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
   try {
-    // Inisialisasi Firebase dengan opsi spesifik platform
     await Firebase.initializeApp(
       options: DefaultFirebaseOptions.currentPlatform,
     );
-    print("Firebase successfully initialized");
   } catch (e) {
-    print('Error initializing Firebase: $e'); // Log jika ada kesalahan
+    debugPrint('Error initializing Firebase: $e');
   }
-  runApp(const MyApp());
+
+  final themeProvider = ThemeProvider();
+  await themeProvider.loadTheme();
+
+  runApp(
+    MultiProvider(
+      providers: [
+        ChangeNotifierProvider.value(value: themeProvider),
+        ChangeNotifierProvider(create: (_) => AuthProvider()),
+      ],
+      child: const MyApp(),
+    ),
+  );
 }
 
 class MyApp extends StatelessWidget {
@@ -22,22 +39,22 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final themeProvider = context.watch<ThemeProvider>();
+
+    bool isLoggedIn = false;
+    try {
+      isLoggedIn = FirebaseAuth.instance.currentUser != null;
+    } catch (_) {
+      isLoggedIn = false;
+    }
+
     return MaterialApp(
       title: 'Ebook App',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        primarySwatch: Colors.blue, // Warna utama aplikasi
-        scaffoldBackgroundColor: Colors.white, // Warna latar belakang aplikasi
-        inputDecorationTheme: InputDecorationTheme(
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(8),
-          ),
-          focusedBorder: OutlineInputBorder(
-            borderSide: BorderSide(color: Colors.blue, width: 2),
-          ),
-        ),
-      ),
-      home: const LoginPage(), // Halaman utama aplikasi
+      theme: themeProvider.lightTheme,
+      darkTheme: themeProvider.darkTheme,
+      themeMode: themeProvider.themeMode,
+      home: isLoggedIn ? const MainShell() : const LoginPage(),
     );
   }
 }

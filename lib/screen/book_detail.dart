@@ -1,382 +1,591 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:ebook/screen/baca_buku.dart';
-import 'package:firebase_auth/firebase_auth.dart'; // Import Firebase Auth
 import 'package:flutter/material.dart';
-import 'dart:convert';
-import 'dart:typed_data';
-import 'history.dart';
-import 'favorite.dart';
-import 'profile.dart';
+import 'package:provider/provider.dart';
+
+import 'package:ebook/model/book_model.dart';
+import 'package:ebook/provider/auth_provider.dart';
+import 'package:ebook/service/book_service.dart';
+import 'package:ebook/screen/baca_buku.dart';
+import 'package:ebook/screen/book_update.dart';
+import 'package:ebook/widgets/book_cover.dart';
 
 class BookDetailPage extends StatefulWidget {
-  final String title;
-  final String author;
+  final String? title;
+  final String? author;
   final dynamic image;
-  final int pages;
+  final int? pages;
+  final Map<String, dynamic>? book;
+  final String bookId;
+  final BookModel? bookModel;
 
   const BookDetailPage({
-    required this.title,
-    required this.author,
-    required this.image,
-    required this.pages,
-    Key? key, required Map<String, dynamic> book, required String bookId,
-  }) : super(key: key);
+    super.key,
+    this.title,
+    this.author,
+    this.image,
+    this.pages,
+    this.book,
+    this.bookId = '',
+    this.bookModel,
+  });
 
   @override
   State<BookDetailPage> createState() => _BookDetailPageState();
 }
 
 class _BookDetailPageState extends State<BookDetailPage> {
-  String _description =
-      "Selena mengisahkan perjalanan seorang gadis muda yang penuh dengan impian dan harapan...";
-  String _format = "E-book Selena tersedia dalam beberapa format, termasuk:\n"
-      "- PDF: Format yang umum dan mudah diakses di berbagai perangkat.\n"
-      "- ePub: Format yang ideal untuk e-reader.\n"
-      "- MOBI: Cocok untuk penggunaan Kindle.";
+  final BookService _service = BookService();
 
-  int _currentIndex = 0;
+  BookModel? _book;
+  dynamic _rawImage;
+  List<BookModel> _suggestions = [];
+  bool _isRefreshing = true;
+  bool _isFavorite = false;
 
   @override
   void initState() {
     super.initState();
-    _loadBookDetails();
+    _rawImage = widget.image;
+    _book = _initialBook();
+    _refresh();
   }
 
-  // Load book details from Firestore
-  Future<void> _loadBookDetails() async {
-    var doc = await FirebaseFirestore.instance
-        .collection('books')
-        .doc(widget.title)
-        .get();
+  BookModel? _initialBook() {
+    if (widget.bookModel != null) return widget.bookModel;
+    if (widget.book != null) {
+      return BookModel.fromMap(widget.book!, widget.bookId);
+    }
+    final hasInfo = (widget.title ?? '').isNotEmpty ||
+        (widget.author ?? '').isNotEmpty ||
+        widget.image != null;
+    if (!hasInfo) return null;
 
-    if (doc.exists) {
+    return BookModel(
+      id: widget.bookId,
+      title: widget.title ?? '',
+      author: widget.author ?? '',
+      image: widget.image is String ? widget.image : 'assets/images/cover.png',
+      pages: widget.pages ?? 0,
+    );
+  }
+
+  Future<void> _refresh() async {
+    final id = widget.bookId.isNotEmpty ? widget.bookId : (_book?.id ?? '');
+
+    try {
+      if (id.isNotEmpty) {
+        final fetched = await _service.fetchById(id);
+        if (fetched != null && mounted) {
+          setState(() {
+            _book = fetched;
+            if (_rawImage == null) _rawImage = fetched.image;
+          });
+        }
+      }
+
+      final all = await _service.fetchAll(limit: 16);
+      if (!mounted) return;
       setState(() {
-        _description = doc['description'] ?? _description;
-        _format = doc['format'] ?? _format;
+        _suggestions =
+            all.where((b) => b.id != id).take(8).toList(growable: false);
       });
+    } catch (_) {
+      // Abaikan kegagalan refresh; data awal tetap ditampilkan.
+    } finally {
+      if (mounted) setState(() => _isRefreshing = false);
     }
   }
 
-  // Add to the user's history collection in Firestore
-  Future<void> _addToHistory() async {
-    User? user = FirebaseAuth.instance.currentUser;
-
-    if (user != null) {
-      var book = {
-        'title': widget.title,
-        'author': widget.author,
-        'image': widget.image is Uint8List
-            ? base64Encode(widget.image)
-            : widget.image,
-        'dateViewed': DateTime.now().toString(),
-      };
-
-      // Add to user's specific history collection
-      await FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid)
-          .collection('history')
-          .add(book);
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Buku berhasil ditambahkan ke riwayat!')),
-      );
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('User belum login!')),
-      );
+  Future<void> _readBook() async {
+    if (_book != null) {
+      try {
+        await _service.addToHistory(_book!);
+      } catch (_) {}
     }
+
+    if (!mounted) return;
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (context) => DetailBukuPage()),
+    );
   }
 
-  // Add to favorites collection in Firestore
   Future<void> _addToFavorites() async {
-    User? user = FirebaseAuth.instance.currentUser;
+    if (_book == null) return;
 
-    if (user != null) {
-      var book = {
-        'title': widget.title,
-        'author': widget.author,
-        'image': widget.image is Uint8List
-            ? base64Encode(widget.image)
-            : widget.image,
-        'dateAdded': DateTime.now().toString(),
-      };
-
-      // Add to user's specific favorites collection
-      await FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid)
-          .collection('favorites')
-          .add(book);
-
+    try {
+      await _service.addToFavorites(_book!);
+      if (!mounted) return;
+      setState(() => _isFavorite = true);
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Buku berhasil ditambahkan ke favorit!')),
+        const SnackBar(content: Text('Buku ditambahkan ke favorit.')),
       );
-    } else {
+    } catch (e) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('User belum login!')),
+        SnackBar(content: Text('Gagal menambahkan ke favorit: $e')),
+      );
+    }
+  }
+
+  Future<void> _openEditor() async {
+    final book = _book;
+    if (book == null) return;
+
+    final result = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(
+        builder: (context) => UpdateBookPage(
+          book: book,
+          bookId: book.id,
+          title: book.title,
+          author: book.author,
+          image: book.image,
+          pages: book.pages,
+        ),
+      ),
+    );
+
+    if (result == true) {
+      setState(() => _isRefreshing = true);
+      await _refresh();
+    }
+  }
+
+  Future<void> _deleteBook() async {
+    final book = _book;
+    if (book == null) return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Hapus Buku'),
+        content: Text('Hapus "${book.title}" dari koleksi?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Batal'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            child: const Text('Hapus'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    try {
+      await _service.deleteBook(book.id);
+      if (!mounted) return;
+      Navigator.pop(context, true);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Gagal menghapus buku: $e')),
       );
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final List<Widget> _pages = [
-      _buildBookDetailContent(context),
-      HistoryPages(),
-      FavoriteBookPage(),
-      ProfilePage(),
-    ];
+    final scheme = Theme.of(context).colorScheme;
+    final isAdmin = context.watch<AuthProvider>().isAdmin;
+
+    final book = _book;
+    final title = book?.title ?? widget.title ?? 'Detail Buku';
+    final author = book?.author ?? widget.author ?? '';
+    final pages = book?.pages ?? widget.pages ?? 0;
+    final description = book?.description ?? '';
+    final format = book?.format ?? 'PDF, ePub';
+    final rating = book?.rating ?? 4.5;
+    final category = book?.category ?? '';
+    final imageSource = _rawImage ?? book?.image;
+    final categoryLabel = _categoryLabel(category);
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Detail Book'),
-      ),
-      body: _pages[_currentIndex],
-      bottomNavigationBar: BottomNavigationBar(
-        currentIndex: _currentIndex,
-        onTap: (index) {
-          setState(() {
-            _currentIndex = index;
-          });
-        },
-        type: BottomNavigationBarType.fixed,
-        selectedItemColor: Colors.teal,
-        unselectedItemColor: Colors.grey,
-        items: const [
-          BottomNavigationBarItem(
-            icon: Icon(Icons.home),
-            label: 'Home',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.history),
-            label: 'Riwayat',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.favorite),
-            label: 'Favorit',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.person),
-            label: 'Profile',
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildBookDetailContent(BuildContext context) {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16.0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            widget.title,
-            style: TextStyle(
-              fontSize: 20,
-              fontWeight: FontWeight.bold,
-              color: const Color.fromARGB(255, 18, 134, 188),
-            ),
-          ),
-          const SizedBox(height: 10),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _buildImage(widget.image),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      _description,
-                      style: TextStyle(fontSize: 16),
+      body: CustomScrollView(
+        slivers: [
+          SliverAppBar(
+            expandedHeight: 320,
+            pinned: true,
+            actions: [
+              if (isAdmin && book != null)
+                PopupMenuButton<String>(
+                  onSelected: (value) {
+                    if (value == 'edit') _openEditor();
+                    if (value == 'delete') _deleteBook();
+                  },
+                  itemBuilder: (context) => const [
+                    PopupMenuItem(
+                      value: 'edit',
+                      child: Row(
+                        children: [
+                          Icon(Icons.edit_outlined, size: 18),
+                          SizedBox(width: 8),
+                          Text('Edit'),
+                        ],
+                      ),
                     ),
-                    const SizedBox(height: 10),
+                    PopupMenuItem(
+                      value: 'delete',
+                      child: Row(
+                        children: [
+                          Icon(Icons.delete_outline,
+                              size: 18, color: Colors.red),
+                          SizedBox(width: 8),
+                          Text('Hapus'),
+                        ],
+                      ),
+                    ),
                   ],
                 ),
-              ),
             ],
-          ),
-          const SizedBox(height: 20),
-          Text(
-            'Format Buku',
-            style: TextStyle(fontWeight: FontWeight.bold),
-          ),
-          Text(_format),
-          const SizedBox(height: 20),
-          Center(
-            child: ElevatedButton(
-              onPressed: () {
-                _addToHistory(); // Add book to history before reading
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => DetailBukuPage(),
+            flexibleSpace: FlexibleSpaceBar(
+              titlePadding:
+                  const EdgeInsets.symmetric(horizontal: 56, vertical: 14),
+              title: Text(
+                title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontSize: 15),
+              ),
+              background: Stack(
+                fit: StackFit.expand,
+                children: [
+                  BookCover(
+                    source: imageSource,
+                    borderRadius: 0,
+                    fit: BoxFit.cover,
                   ),
-                );
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color.fromARGB(255, 18, 134, 188),
-                foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(20),
-                ),
+                  DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [
+                          Colors.black.withOpacity(0.35),
+                          Colors.transparent,
+                          scheme.surface,
+                        ],
+                        stops: const [0, 0.55, 1],
+                      ),
+                    ),
+                  ),
+                ],
               ),
-              child: const Text('Baca Buku'),
             ),
           ),
-          const SizedBox(height: 10),
-          Center(
-            child: ElevatedButton(
-              onPressed: () => _showUpdateDialog(context),
-              child: const Text('Update'),
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (_isRefreshing)
+                    LinearProgressIndicator(
+                      minHeight: 2,
+                      backgroundColor: scheme.surfaceContainerHighest,
+                    ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      if (categoryLabel.isNotEmpty)
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 4,
+                          ),
+                          decoration: BoxDecoration(
+                            color: scheme.primaryContainer,
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: Text(
+                            categoryLabel,
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: scheme.onPrimaryContainer,
+                            ),
+                          ),
+                        ),
+                      const Spacer(),
+                      const Icon(Icons.star_rounded,
+                          size: 18, color: Colors.amber),
+                      const SizedBox(width: 4),
+                      Text(
+                        rating.toStringAsFixed(1),
+                        style: const TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    title,
+                    style: const TextStyle(
+                      fontSize: 24,
+                      fontWeight: FontWeight.bold,
+                      height: 1.2,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Icon(
+                        Icons.person_outline_rounded,
+                        size: 16,
+                        color: scheme.onSurfaceVariant,
+                      ),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          author.isEmpty ? 'Penulis tidak diketahui' : author,
+                          style: TextStyle(
+                            fontSize: 14,
+                            color: scheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  Row(
+                    children: [
+                      _InfoPill(
+                        icon: Icons.menu_book_outlined,
+                        label: '$pages halaman',
+                      ),
+                      const SizedBox(width: 10),
+                      _InfoPill(
+                        icon: Icons.description_outlined,
+                        label: format,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 24),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: FilledButton.icon(
+                          onPressed: _readBook,
+                          icon: const Icon(Icons.menu_book_rounded),
+                          label: const Text('Baca Buku'),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      IconButton.outlined(
+                        tooltip: 'Tambah ke favorit',
+                        onPressed: _isFavorite ? null : _addToFavorites,
+                        icon: Icon(
+                          _isFavorite
+                              ? Icons.favorite_rounded
+                              : Icons.favorite_border_rounded,
+                          color: _isFavorite ? Colors.red : null,
+                        ),
+                      ),
+                    ],
+                  ),
+                  if (isAdmin && book != null) ...[
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            onPressed: _openEditor,
+                            icon: const Icon(Icons.edit_outlined, size: 18),
+                            label: const Text('Edit Buku'),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            onPressed: _deleteBook,
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: Colors.red,
+                            ),
+                            icon: const Icon(Icons.delete_outline, size: 18),
+                            label: const Text('Hapus'),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                  const SizedBox(height: 28),
+                  const _SectionTitle('Deskripsi'),
+                  const SizedBox(height: 8),
+                  Text(
+                    description.isEmpty
+                        ? 'Belum ada deskripsi untuk buku ini.'
+                        : description,
+                    style: TextStyle(
+                      fontSize: 14,
+                      height: 1.6,
+                      color: description.isEmpty
+                          ? scheme.onSurfaceVariant
+                          : scheme.onSurface,
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                  const _SectionTitle('Format Buku'),
+                  const SizedBox(height: 8),
+                  Text(
+                    format,
+                    style: TextStyle(
+                      fontSize: 14,
+                      height: 1.6,
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+                  if (_suggestions.isNotEmpty) ...[
+                    const SizedBox(height: 28),
+                    const _SectionTitle('Kamu mungkin suka'),
+                    const SizedBox(height: 12),
+                    SizedBox(
+                      height: 214,
+                      child: ListView.separated(
+                        scrollDirection: Axis.horizontal,
+                        itemCount: _suggestions.length,
+                        separatorBuilder: (_, __) => const SizedBox(width: 12),
+                        itemBuilder: (context, index) {
+                          final suggestion = _suggestions[index];
+                          return _SuggestionCard(book: suggestion);
+                        },
+                      ),
+                    ),
+                  ],
+                ],
+              ),
             ),
-          ),
-          const SizedBox(height: 10),
-          Center(
-            child: ElevatedButton(
-              onPressed: _addToFavorites,
-              child: const Text('Tambah ke Favorit'),
-            ),
-          ),
-          const SizedBox(height: 20),
-          Text(
-            'Disarankan Untuk Anda',
-            style: TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
-              color: const Color.fromARGB(255, 18, 134, 188),
-            ),
-          ),
-          const SizedBox(height: 10),
-          Wrap(
-            spacing: 10,
-            runSpacing: 10,
-            children: [
-              _buildRecommendedBook(
-                "Selena",
-                "Hamna",
-                "assets/images/selena.png",
-                context,
-              ),
-              _buildRecommendedBook(
-                "Hello",
-                "Nasywa",
-                "assets/images/hello.png",
-                context,
-              ),
-              _buildRecommendedBook(
-                "Pulang Pergi",
-                "Angga",
-                "assets/images/pulangpergi.png",
-                context,
-              ),
-              _buildRecommendedBook(
-                "Laskar Pelangi",
-                "Giee",
-                "assets/images/laskarpelangi.png",
-                context,
-              ),
-            ],
           ),
         ],
       ),
     );
   }
 
-  Widget _buildImage(dynamic image) {
-    if (image is Uint8List) {
-      return Image.memory(image, height: 150, width: 100, fit: BoxFit.cover);
-    } else if (image is String) {
-      return Image.asset(image, height: 150, width: 100, fit: BoxFit.cover);
-    } else {
-      return Image.asset('assets/images/default.png',
-          height: 150, width: 100, fit: BoxFit.cover);
+  String _categoryLabel(String category) {
+    switch (category) {
+      case 'Recommended':
+        return 'Rekomendasi';
+      case 'NewBook':
+        return 'Buku Baru';
+      case 'General':
+        return 'Umum';
+      default:
+        return category;
     }
   }
+}
 
-  void _showUpdateDialog(BuildContext context) {
-    final TextEditingController descriptionController =
-        TextEditingController(text: _description);
-    final TextEditingController formatController =
-        TextEditingController(text: _format);
+class _InfoPill extends StatelessWidget {
+  final IconData icon;
+  final String label;
 
-    showDialog(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('Update Buku'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: descriptionController,
-                decoration:
-                    const InputDecoration(hintText: 'Masukkan deskripsi baru'),
-                maxLines: 4,
-              ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: formatController,
-                decoration:
-                    const InputDecoration(hintText: 'Masukkan format baru'),
-                maxLines: 3,
-              ),
-            ],
+  const _InfoPill({required this.icon, required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerHighest.withOpacity(0.5),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 14, color: scheme.onSurfaceVariant),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 12,
+              color: scheme.onSurfaceVariant,
+            ),
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Batal'),
-            ),
-            ElevatedButton(
-              onPressed: () {
-                setState(() {
-                  _description = descriptionController.text.trim();
-                  _format = formatController.text.trim();
-                });
-                Navigator.of(context).pop();
-              },
-              child: const Text('Simpan'),
-            ),
-          ],
-        );
-      },
+        ],
+      ),
     );
   }
+}
 
-  Widget _buildRecommendedBook(
-      String title, String author, String image, BuildContext context) {
-    return GestureDetector(
-      onTap: () {
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (context) => BookDetailPage(
-              title: title,
-              author: author,
-              image: image,
-              pages: 100, book: {}, bookId: '',
+class _SectionTitle extends StatelessWidget {
+  final String title;
+
+  const _SectionTitle(this.title);
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      title,
+      style: const TextStyle(
+        fontSize: 17,
+        fontWeight: FontWeight.bold,
+      ),
+    );
+  }
+}
+
+class _SuggestionCard extends StatelessWidget {
+  final BookModel book;
+
+  const _SuggestionCard({required this.book});
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 104,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => BookDetailPage(
+                bookModel: book,
+                bookId: book.id,
+                title: book.title,
+                author: book.author,
+                image: book.image,
+                pages: book.pages,
+              ),
             ),
-          ),
-        );
-      },
-      child: Column(
-        children: [
-          Image.asset(
-            image,
-            width: 100,
-            height: 150,
-          ),
-          const SizedBox(height: 5),
-          Text(
-            title,
-            style: TextStyle(fontWeight: FontWeight.bold),
-          ),
-          Text(author),
-        ],
+          );
+        },
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            BookCover(
+              source: book.image,
+              width: 104,
+              height: 152,
+              borderRadius: 12,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              book.title,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                height: 1.2,
+              ),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              book.author,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 11,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
