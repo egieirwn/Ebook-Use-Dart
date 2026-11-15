@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'package:ebook/model/book_model.dart';
+import 'package:ebook/service/book_api_gateway.dart';
 import 'package:ebook/service/book_service.dart';
 import 'package:ebook/screen/book_detail.dart';
 import 'package:ebook/widgets/book_card.dart';
@@ -14,16 +15,17 @@ class SearchPage extends StatefulWidget {
 }
 
 class _SearchPageState extends State<SearchPage> {
+  final BookApiGateway _gateway = BookApiGateway();
   final BookService _service = BookService();
   final TextEditingController _searchController =
-      TextEditingController(text: 'flutter');
+      TextEditingController(text: 'sherlock');
 
   List<BookModel> _onlineBooks = [];
   List<BookModel> _localBooks = [];
   bool _isLoading = true;
   String? _error;
-  String _activeQuery = 'flutter';
-  bool _isOnlineSource = true; // true = Google Books API, false = Firestore
+  String _activeQuery = 'sherlock';
+  bool _isOnlineSource = true;
 
   @override
   void initState() {
@@ -39,20 +41,20 @@ class _SearchPageState extends State<SearchPage> {
 
   Future<void> _loadInitialData() async {
     await Future.wait([
-      _searchOnlineBooks('flutter'),
+      _searchGateway('sherlock'),
       _loadLocalBooks(),
     ]);
   }
 
-  Future<void> _searchOnlineBooks(String query) async {
+  Future<void> _searchGateway(String query) async {
     setState(() {
       _isLoading = true;
       _error = null;
-      _activeQuery = query.trim().isEmpty ? 'flutter' : query.trim();
+      _activeQuery = query.trim().isEmpty ? 'sherlock' : query.trim();
     });
 
     try {
-      final books = await _service.fetchGoogleBooks(_activeQuery, maxResults: 10);
+      final books = await _gateway.searchGateway(_activeQuery, limit: 12);
       if (!mounted) return;
       setState(() {
         _onlineBooks = books;
@@ -61,7 +63,7 @@ class _SearchPageState extends State<SearchPage> {
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _error = 'Gagal memuat buku dari Google Books API: $e';
+        _error = 'Gagal memuat buku melalui API Gateway: $e';
         _isLoading = false;
       });
     }
@@ -90,7 +92,7 @@ class _SearchPageState extends State<SearchPage> {
 
   void _onSearchSubmitted(String value) {
     if (_isOnlineSource) {
-      _searchOnlineBooks(value);
+      _searchGateway(value);
     } else {
       setState(() {});
     }
@@ -103,14 +105,14 @@ class _SearchPageState extends State<SearchPage> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Jelajahi Buku'),
+        title: const Text('Jelajahi & Baca Buku'),
         actions: [
           IconButton(
             tooltip: 'Segarkan',
             icon: const Icon(Icons.refresh_rounded),
             onPressed: () {
               if (_isOnlineSource) {
-                _searchOnlineBooks(_searchController.text);
+                _searchGateway(_searchController.text);
               } else {
                 _loadLocalBooks();
               }
@@ -129,7 +131,7 @@ class _SearchPageState extends State<SearchPage> {
               onSubmitted: _onSearchSubmitted,
               decoration: InputDecoration(
                 hintText: _isOnlineSource
-                    ? 'Cari Google Books API (cth: flutter, python, novel)...'
+                    ? 'Cari (cth: sherlock, frankenstein, dongeng, indonesia)...'
                     : 'Cari di koleksi tersimpan...',
                 prefixIcon: const Icon(Icons.search_rounded),
                 suffixIcon: Row(
@@ -164,9 +166,9 @@ class _SearchPageState extends State<SearchPage> {
                   label: const Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(Icons.public_rounded, size: 16),
+                      Icon(Icons.hub_rounded, size: 16),
                       SizedBox(width: 6),
-                      Text('Google Books API'),
+                      Text('API Gateway (Full Text)'),
                     ],
                   ),
                   selected: _isOnlineSource,
@@ -174,7 +176,7 @@ class _SearchPageState extends State<SearchPage> {
                     if (selected && !_isOnlineSource) {
                       setState(() => _isOnlineSource = true);
                       if (_onlineBooks.isEmpty) {
-                        _searchOnlineBooks(_searchController.text);
+                        _searchGateway(_searchController.text);
                       }
                     }
                   },
@@ -212,7 +214,7 @@ class _SearchPageState extends State<SearchPage> {
                   children: [
                     CircularProgressIndicator(),
                     SizedBox(height: 12),
-                    Text('Menghubungi Google Books API...'),
+                    Text('Menghubungi API Gateway (Gutenberg, Wikisource, Open Library)...'),
                   ],
                 ),
               ),
@@ -276,7 +278,7 @@ class _SearchPageState extends State<SearchPage> {
               padding: const EdgeInsets.only(bottom: 12),
               child: Text(
                 _isOnlineSource
-                    ? '${results.length} buku dari Google Books API (query: "$_activeQuery")'
+                    ? '${results.length} karya ditemukan • Sumber: ${results.first.source}'
                     : '${results.length} buku di koleksi tersimpan',
                 style: TextStyle(
                   fontSize: 12,

@@ -105,7 +105,7 @@ class _BookDetailPageState extends State<BookDetailPage> {
     if (!mounted) return;
     Navigator.push(
       context,
-      MaterialPageRoute(builder: (context) => DetailBukuPage()),
+      MaterialPageRoute(builder: (context) => DetailBukuPage(book: _book)),
     );
   }
 
@@ -361,6 +361,14 @@ class _BookDetailPageState extends State<BookDetailPage> {
                         icon: Icons.description_outlined,
                         label: format,
                       ),
+                      if (book != null &&
+                          book.source != 'Local / Firestore') ...[
+                        const SizedBox(width: 10),
+                        _InfoPill(
+                          icon: Icons.hub_outlined,
+                          label: book.source,
+                        ),
+                      ],
                     ],
                   ),
                   const SizedBox(height: 24),

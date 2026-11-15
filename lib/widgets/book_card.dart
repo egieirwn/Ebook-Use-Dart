@@ -149,6 +149,20 @@ class BookCard extends StatelessWidget {
               color: scheme.onSurfaceVariant,
             ),
           ),
+          if (book.source != 'Local / Firestore')
+            Padding(
+              padding: const EdgeInsets.only(top: 2.0),
+              child: Text(
+                book.source,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 10,
+                  color: scheme.primary,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
           const SizedBox(height: 4),
           Row(
             children: [

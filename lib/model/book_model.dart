@@ -10,6 +10,9 @@ class BookModel {
   final String description;
   final String format;
   final double rating;
+  final String? textUrl;
+  final String? rawContent;
+  final String source;
 
   BookModel({
     required this.id,
@@ -21,6 +24,9 @@ class BookModel {
     this.description = '',
     this.format = 'PDF, ePub',
     this.rating = 4.5,
+    this.textUrl,
+    this.rawContent,
+    this.source = 'Local / Firestore',
   });
 
   factory BookModel.fromFirestore(DocumentSnapshot doc) {
@@ -39,6 +45,9 @@ class BookModel {
       rating: (data['rating'] is num)
           ? (data['rating'] as num).toDouble()
           : double.tryParse(data['rating']?.toString() ?? '4.5') ?? 4.5,
+      textUrl: data['textUrl']?.toString(),
+      rawContent: data['rawContent']?.toString(),
+      source: data['source']?.toString() ?? 'Local / Firestore',
     );
   }
 
@@ -55,6 +64,9 @@ class BookModel {
       description: data['description'] ?? '',
       format: data['format'] ?? 'PDF, ePub',
       rating: (data['rating'] is num) ? (data['rating'] as num).toDouble() : 4.5,
+      textUrl: data['textUrl']?.toString(),
+      rawContent: data['rawContent']?.toString(),
+      source: data['source']?.toString() ?? 'Local / Firestore',
     );
   }
 
@@ -68,6 +80,39 @@ class BookModel {
       'description': description,
       'format': format,
       'rating': rating,
+      'textUrl': textUrl,
+      'rawContent': rawContent,
+      'source': source,
     };
+  }
+
+  BookModel copyWith({
+    String? id,
+    String? title,
+    String? author,
+    String? category,
+    String? image,
+    int? pages,
+    String? description,
+    String? format,
+    double? rating,
+    String? textUrl,
+    String? rawContent,
+    String? source,
+  }) {
+    return BookModel(
+      id: id ?? this.id,
+      title: title ?? this.title,
+      author: author ?? this.author,
+      category: category ?? this.category,
+      image: image ?? this.image,
+      pages: pages ?? this.pages,
+      description: description ?? this.description,
+      format: format ?? this.format,
+      rating: rating ?? this.rating,
+      textUrl: textUrl ?? this.textUrl,
+      rawContent: rawContent ?? this.rawContent,
+      source: source ?? this.source,
+    );
   }
 }
